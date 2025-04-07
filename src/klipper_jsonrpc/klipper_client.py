@@ -66,7 +66,6 @@ class KlipperClient:
 
         return result
 
-
     def add_method_process(self, method, func):
         self.original_method_process[method] = func
 
