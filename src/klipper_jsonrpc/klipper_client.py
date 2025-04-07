@@ -11,15 +11,17 @@ logger = logging.getLogger(__name__)
 class KlipperClient:
     def __init__(self):
         self.session = None
+        self.ws_url = ""
         self.ws_connect = None
         self.receive_task = None
         self.pending_requests = {}
         self.original_method_process = {}
         self.loop = None
-    async def connect(self, url):
+    async def connect(self, host, port):
 
         self.session = aiohttp.ClientSession()
-        self.ws_connect = await self.session.ws_connect(url)
+        self.ws_url = f"ws://{host}:{port}/websocket"
+        self.ws_connect = await self.session.ws_connect(self.ws_url)
 
         self.receive_task = asyncio.create_task(self.receive_process())
 
@@ -84,8 +86,8 @@ class KlipperClient:
     def run_coroutine(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
-    def sync_connect(self, url):
-        fut = self.run_coroutine(self.connect(url))
+    def sync_connect(self, host, port):
+        fut = self.run_coroutine(self.connect(host, port))
         fut.result()
 
     def sync_send_request(self, method, params=None):
@@ -98,11 +100,16 @@ class KlipperClient:
         self.loop = None
         self.thread = None
     
-    def run(self, url):
+    def sync_send_gcode(self, gcodes):
+        params = {"script": "\n".join(gcodes)}
+        logger.debug(f"send gcode params: {params}")
+        return self.sync_send_request("printer.gcode.script", params)
+        
+    def run(self, host, port):
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._start_loop, args=(self.loop,), daemon=True)
         self.thread.start()
-        self.sync_connect(url)
+        self.sync_connect(host, port)
 
     def _start_loop(self, loop):
         asyncio.set_event_loop(loop)
@@ -113,7 +120,8 @@ if __name__ == '__main__':
     import sys
     import time
     args = sys.argv
-    printer_url = args[1]
+    host = args[1]
+    port = int(args[2])
 
     kc = KlipperClient()
 
@@ -122,7 +130,7 @@ if __name__ == '__main__':
     
     # 1回目の接続
     print("First connection")
-    kc.run(printer_url)
+    kc.run(host, port)
     try:
         kc.add_method_process("notify_proc_stat_update", original_method)
         res = kc.sync_send_request("printer.info")
@@ -134,9 +142,10 @@ if __name__ == '__main__':
     time.sleep(5)
     # 2回目の接続
     print("Second connection")
-    kc.run(printer_url)
+    kc.run(host, port)
     try:
         kc.add_method_process("notify_proc_stat_update", original_method)
+        kc.sync_send_gcode(["G28 X Y"])
         res = kc.sync_send_request("printer.info")
         print(res)
         time.sleep(3)
